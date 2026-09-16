@@ -40,7 +40,12 @@
           <input type="checkbox" v-model="nablaVF" :disabled="loading || generatingImage" @change="clearGeneratedImage" />
           Calculate NABLA VF
         </label>
+        <label class="mode-toggle">
+          <input type="checkbox" v-model="excludeNewCharts" :disabled="loading || generatingImage || databaseLoading" @change="loadMusicDatabase" />
+          Exclude charts added after 3/24/2025
+        </label>
         <p class="calculation-note">MAXXIVE clears count as EXCESSIVE clears.</p>
+        <p class="calculation-note">After changing databases, calculate or upload maps.db again.</p>
       </div>
 
       <div v-if="playerSelect.visible" class="player-select card">
@@ -146,6 +151,9 @@ import { ref, computed, onMounted } from "vue"
 import initSqlJs from "sql.js"
 import musicDbUrl from "@/assets/music_db.xml?url"
 
+const historicalMusicDbUrls = import.meta.glob("./assets/20250324_music_db.xml", { query: "?url", import: "default", eager: true })
+const excludeNewCharts = ref(false)
+const databaseLoading = ref(false)
 const mdb = ref({})
 const mdbReady = ref(false)
 
@@ -329,9 +337,22 @@ function parseMusicDbXml(xmlText) {
   return out
 }
 
-onMounted(async () => {
+async function loadMusicDatabase() {
+  databaseLoading.value = true
+  const filename = excludeNewCharts.value ? "20250324_music_db.xml" : "music_db.xml"
+  const url = excludeNewCharts.value
+    ? historicalMusicDbUrls["./assets/20250324_music_db.xml"]
+    : musicDbUrl
+  mdbReady.value = false
+  mdb.value = {}
+  allScores.value = []
+  clearGeneratedImage()
+  playerSelect.value = { visible: false, players: [], selected: "", dbBuffer: null }
+  error.value = ""
   try {
-    const response = await fetch(musicDbUrl)
+    if (!url) throw new Error(`Add ${filename} to src/assets before building.`)
+    const response = await fetch(url)
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
 
     // Get raw bytes
     const buffer = await response.arrayBuffer()
@@ -343,10 +364,15 @@ onMounted(async () => {
     mdb.value = parseMusicDbXml(xmlText)
     mdbReady.value = true
   } catch (e) {
-    console.error("Failed to load music_db.xml", e)
-    error.value = "Failed to load music database."
+    console.error(`Failed to load ${filename}`, e)
+    error.value = `Failed to load ${filename}: ${e.message}`
+  } finally {
+    // Allow switching back if the selected database is missing or invalid.
+    databaseLoading.value = false
   }
-})
+}
+
+onMounted(loadMusicDatabase)
 
 function normalizeTitleArtist(str) {
   return (str ?? "").toString().trim().toLowerCase()
@@ -710,6 +736,10 @@ async function calculateFromDb(db, userName, scoresTable, chartsTable) {
     }
 
     const level = getLevelFromMdb(mdbSong, chart.diff_index)
+    if (!(level > 0)) {
+      skippedCount += 1
+      continue
+    }
     const diff = (chart.diff_shortname || "NOV").toUpperCase()
 
     // PB = best score + best lamp (from any play on this chart)
@@ -790,6 +820,10 @@ async function loadData() {
       }
 
       const level = getLevel(chart, mdbSong)
+      if (!(level > 0)) {
+        skippedCount += 1
+        continue
+      }
 
       const lamp = normalizeLamp(pb.scoreData.lamp)
 
