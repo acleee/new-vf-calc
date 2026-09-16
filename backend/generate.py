@@ -29,12 +29,19 @@ WHITE     = (238, 240, 236)
 GRAY      = (135, 145, 135)
 GOLD      = (242, 242, 242)
 
-# Exceed Gear is the only supported calculation and image style.
+# Exceed Gear is the default; both styles treat MAXXIVE clears as EXCESSIVE.
 COLOR_SCHEME = {
     "bg_top":    (12, 13, 15),
     "bg_bottom": (58, 60, 65),
     "card_tint": (225, 228, 232),
     "label":     "VF6 B50 (NO MXV)",
+}
+
+NABLA_COLOR_SCHEME = {
+    "bg_top":    (3, 16, 7),
+    "bg_bottom": (11, 63, 18),
+    "card_tint": (190, 255, 200),
+    "label":     "NABLA VF B50 (NO MXV)",
 }
 
 DIFF_STYLES = {
@@ -346,6 +353,7 @@ def generate_b50_image(data: dict) -> Image.Image:
     Expected keys in *data*:
         username   str
         vf         float
+        mode       str – "exceed" (default) or "nabla"
         scores     list[dict]  – up to 50 items, each with:
                        title, diff, level, score, grade, lamp, vf,
                        songId, timeAchieved (ms)
@@ -355,7 +363,7 @@ def generate_b50_image(data: dict) -> Image.Image:
     vf       = float(data.get("vf") or 0)
     now      = datetime.now(timezone.utc)
 
-    scheme = COLOR_SCHEME
+    scheme = NABLA_COLOR_SCHEME if data.get("mode") == "nabla" else COLOR_SCHEME
 
     img  = _background_gradient(IMAGE_WIDTH, IMAGE_HEIGHT, scheme["bg_top"], scheme["bg_bottom"])
     draw = ImageDraw.Draw(img)

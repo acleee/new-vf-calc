@@ -36,6 +36,10 @@
             Upload maps.db
           </button>
         </div>
+        <label class="mode-toggle">
+          <input type="checkbox" v-model="nablaVF" :disabled="loading || generatingImage" @change="clearGeneratedImage" />
+          Calculate NABLA VF
+        </label>
         <p class="calculation-note">MAXXIVE clears count as EXCESSIVE clears.</p>
       </div>
 
@@ -66,7 +70,7 @@
 
       <section v-if="best50.length" class="results">
         <div class="results-header card">
-          <h2 class="vf-display">Exceed Gear VF: <span class="vf-value">{{ totalVF.toFixed(3) }}</span></h2>
+          <h2 class="vf-display">{{ nablaVF ? "NABLA VF:" : "Exceed Gear VF:" }} <span class="vf-value">{{ totalVF.toFixed(3) }}</span></h2>
           <button type="button" class="btn btn-secondary export-csv-btn" @click="exportToCsv">
             Export to CSV
           </button>
@@ -148,8 +152,15 @@ const mdbReady = ref(false)
 const userId = ref("")
 const loading = ref(false)
 const error = ref("")
-const best50 = ref([])
-const totalVF = ref(0)
+const nablaVF = ref(false)
+const allScores = ref([])
+const best50 = computed(() => allScores.value.map(row => ({
+  ...row,
+  level: roundLevel(row.level),
+  lamp: normalizeLamp(row.lamp),
+  vf: calculateVF(row),
+})).sort((a, b) => b.vf - a.vf).slice(0, 50))
+const totalVF = computed(() => best50.value.reduce((sum, row) => sum + row.vf, 0))
 let msg = ""
 let skippedCount = 0
 
@@ -234,13 +245,18 @@ function exportToCsv() {
 
 const BACKEND_URL = "https://b50-api.whiteou7.id.vn"
 
+function clearGeneratedImage() {
+  if (generatedImageUrl.value) URL.revokeObjectURL(generatedImageUrl.value)
+  generatedImageUrl.value = ""
+}
+
 async function generateImage() {
   generatingImage.value = true
   try {
     const payload = {
       username: activePlayerName.value || "Player",
       vf: totalVF.value,
-      mode: "exceed",
+      mode: nablaVF.value ? "nabla" : "exceed",
       scores: best50.value.map((r) => ({
         title: r.title,
         diff: r.diff,
@@ -485,14 +501,17 @@ function getLevel(chart, chartMeta) {
   return chartMeta.difficulty[idx] || 0
 }
 
-// Exceed Gear only had whole-number chart levels
+// Nabla uses decimal levels; Exceed Gear uses whole-number chart levels
 function roundLevel(level) {
-  return Math.trunc(level)
+  return nablaVF.value ? level : Math.trunc(level)
 }
 
 function calculateVF({ level, score, grade, lamp }) {
   const g = gradeCoeff[grade] ?? 1
-  const c = clearCoeff[normalizeLamp(lamp)] ?? 1
+  const normalizedLamp = normalizeLamp(lamp)
+  const c = nablaVF.value && normalizedLamp === "ULTIMATE CHAIN"
+    ? 1.06
+    : clearCoeff[normalizedLamp] ?? 1
   const lvl = roundLevel(level)
 
   const base =
@@ -522,8 +541,7 @@ async function onDbFileSelected(ev) {
   if (!file) return
   ev.target.value = ""
   error.value = ""
-  best50.value = []
-  totalVF.value = 0
+  allScores.value = []
   failedJackets.value = new Set()
   generatedImageUrl.value = ""
   loading.value = true
@@ -592,8 +610,7 @@ function confirmPlayerAndCalculate() {
   playerSelect.value = { visible: false, players: [], selected: "", dbBuffer: null }
   loading.value = true
   error.value = ""
-  best50.value = []
-  totalVF.value = 0
+  allScores.value = []
   failedJackets.value = new Set()
   generatedImageUrl.value = ""
   ;(async () => {
@@ -653,15 +670,15 @@ async function calculateFromDb(db, userName, scoresTable, chartsTable) {
   if (userName != null) {
     stmt.bind([userName])
   }
-  const allScores = []
+  const dbScores = []
   while (stmt.step()) {
-    allScores.push(stmt.getAsObject())
+    dbScores.push(stmt.getAsObject())
   }
   stmt.free()
 
   // Group all plays by chart_hash
   const playsByChart = new Map()
-  for (const row of allScores) {
+  for (const row of dbScores) {
     const h = String(row.chart_hash ?? "").trim()
     if (!playsByChart.has(h)) playsByChart.set(h, [])
     playsByChart.get(h).push({
@@ -692,7 +709,7 @@ async function calculateFromDb(db, userName, scoresTable, chartsTable) {
       continue
     }
 
-    const level = roundLevel(getLevelFromMdb(mdbSong, chart.diff_index))
+    const level = getLevelFromMdb(mdbSong, chart.diff_index)
     const diff = (chart.diff_shortname || "NOV").toUpperCase()
 
     // PB = best score + best lamp (from any play on this chart)
@@ -713,7 +730,6 @@ async function calculateFromDb(db, userName, scoresTable, chartsTable) {
     }
 
     const grade = gradeFromScore(bestScore)
-    const vf = calculateVF({ level, score: bestScore, grade, lamp: bestLamp })
 
     rows.push({
       chart_hash: chartHash,
@@ -724,14 +740,11 @@ async function calculateFromDb(db, userName, scoresTable, chartsTable) {
       score: bestScore,
       grade,
       lamp: bestLamp,
-      vf,
       timeAchieved: bestTimestamp,
     })
   }
 
-  rows.sort((a, b) => b.vf - a.vf)
-  best50.value = rows.slice(0, 50)
-  totalVF.value = best50.value.reduce((s, r) => s + r.vf, 0)
+  allScores.value = rows
   if (skippedCount > 0) {
     error.value = `Skipped ${skippedCount} chart(s) (no match in mdb by title+artist).`
   }
@@ -740,8 +753,7 @@ async function calculateFromDb(db, userName, scoresTable, chartsTable) {
 async function loadData() {
   skippedCount = 0
   error.value = ""
-  best50.value = []
-  totalVF.value = 0
+  allScores.value = []
   failedJackets.value = new Set()
   generatedImageUrl.value = ""
 
@@ -777,15 +789,9 @@ async function loadData() {
         continue
       }
 
-      const level = roundLevel(getLevel(chart, mdbSong))
+      const level = getLevel(chart, mdbSong)
 
       const lamp = normalizeLamp(pb.scoreData.lamp)
-      const vf = calculateVF({
-        level,
-        score: pb.scoreData.score,
-        grade: pb.scoreData.grade,
-        lamp
-      })
 
       rows.push({
         chartID: pb.chartID,
@@ -796,15 +802,11 @@ async function loadData() {
         score: pb.scoreData.score,
         grade: pb.scoreData.grade,
         lamp,
-        vf,
         timeAchieved: pb.timeAchieved ?? null,
       })
     }
 
-    rows.sort((a, b) => b.vf - a.vf)
-
-    best50.value = rows.slice(0, 50)
-    totalVF.value = best50.value.reduce((s, r) => s + r.vf, 0)
+    allScores.value = rows
   } catch (e) {
     msg += String(e)
   } finally {
@@ -877,6 +879,15 @@ async function loadData() {
   gap: 0.75rem;
   align-items: center;
   flex-wrap: wrap;
+}
+
+.mode-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  color: #a8acc0;
+  font-size: 0.9rem;
 }
 
 .calculation-note {
