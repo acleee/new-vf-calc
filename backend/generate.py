@@ -132,7 +132,7 @@ def _fetch_jacket(song_id):
             return Image.open(cache).convert("RGB")
         except Exception:
             pass
-    url = f"{JACKET_BASE_URL}/{sid}_novice.webp"
+    url = f"{JACKET_BASE_URL}/{sid}_maximum.webp"
     try:
         r = requests.get(url, timeout=8)
         if r.status_code == 200:
@@ -371,7 +371,7 @@ def generate_b50_image(data: dict) -> Image.Image:
     draw.text((mx + 8,  my + 4), scheme["label"],            font=font(13),                   fill=(235, 235, 235))
     draw.text((mx + 8, my + 22), username,                    font=best_font(16, username),    fill=WHITE)
     draw.text((mx + 8, my + 45), f"{vf:.3f} VF",              font=font(17),                   fill=(255, 220, 90))
-    draw.text((mx + CARD_WIDTH - 8,  my + 4), "whiteou7.github.io/new-vf-calc", font=font(9), fill=GRAY, anchor="ra")
+    draw.text((mx + CARD_WIDTH - 8,  my + 4), "acleee.github.io/new-vf-calc", font=font(9), fill=GRAY, anchor="ra")
     draw.text((mx + CARD_WIDTH - 8, my + 53), now.strftime("%B %d, %Y"),         font=font(9), fill=GRAY, anchor="ra")
 
     # ── Prefetch all jackets in parallel ─────────────────────────────────────

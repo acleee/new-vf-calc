@@ -2,7 +2,7 @@
   <div class="app">
     <div class="container">
       <header class="header">
-        <h1 class="title">SDVX B50 Calculator</h1>
+        <h1 class="title">VF6 B50 Calculator (NO MAXXIVE)</h1>
       </header>
 
       <div class="input-card">
@@ -36,7 +36,7 @@
             Upload maps.db
           </button>
         </div>
-        <p class="calculation-note">Exceed Gear VF · MAXXIVE clears count as EXCESSIVE clears.</p>
+        <p class="calculation-note">MAXXIVE clears count as EXCESSIVE clears.</p>
       </div>
 
       <div v-if="playerSelect.visible" class="player-select card">
