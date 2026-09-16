@@ -7,15 +7,11 @@ const source = readFileSync(new URL('../src/App.vue', import.meta.url), 'utf8')
 const script = source.match(/<script setup>([\s\S]*?)<\/script>/)[1]
   .replace(/^import .*$/gm, '')
   .replaceAll('import.meta.env.BASE_URL', '"/"')
-  .replace(/^const historicalMusicDbUrls = .*$/m, 'const historicalMusicDbUrls = { "./assets/20250324_music_db.xml": "historical.xml" }')
 
 function app(fetch = () => {}) {
   const context = vm.createContext({
     ref: value => ({ value }), computed: fn => ({ get value() { return fn() } }), onMounted: () => {},
     fetch, console,
-    musicDbUrl: 'current.xml',
-    TextDecoder,
-    URL: { revokeObjectURL() {} },
   })
   vm.runInContext(script, context)
   return context
@@ -116,52 +112,4 @@ test('image exports use the selected mode and normalized lamp', async () => {
   }
   vm.runInContext('clearGeneratedImage()', context)
   assert.equal(vm.runInContext('generatedImageUrl.value', context), '')
-})
-
-test('database checkbox selects the historical asset and clears stale results', async () => {
-  const requested = []
-  const context = app(async url => {
-    requested.push(url)
-    return { ok: true, arrayBuffer: async () => new ArrayBuffer(0) }
-  })
-  vm.runInContext('parseMusicDbXml = () => ({ "1": { title: "Test" } })', context)
-  await vm.runInContext('loadMusicDatabase()', context)
-  assert.equal(requested[0], 'current.xml')
-  vm.runInContext('allScores.value = [{ level: 19, score: 9900000, grade: "S", lamp: "CLEAR" }]; generatedImageUrl.value = "blob:old"; excludeNewCharts.value = true', context)
-  await vm.runInContext('loadMusicDatabase()', context)
-  assert.equal(requested[1], 'historical.xml')
-  assert.equal(vm.runInContext('best50.value.length', context), 0)
-  assert.equal(vm.runInContext('generatedImageUrl.value', context), '')
-  assert.equal(vm.runInContext('mdbReady.value', context), true)
-  vm.runInContext('excludeNewCharts.value = false', context)
-  await vm.runInContext('loadMusicDatabase()', context)
-  assert.equal(requested[2], 'current.xml')
-})
-
-test('failed historical database load blocks calculation and allows switching back', async () => {
-  const context = app(async () => ({ ok: false, status: 404 }))
-  context.console = { error() {} }
-  vm.runInContext('excludeNewCharts.value = true', context)
-  await vm.runInContext('loadMusicDatabase()', context)
-  assert.equal(vm.runInContext('mdbReady.value', context), false)
-  assert.equal(vm.runInContext('databaseLoading.value', context), false)
-  assert.match(vm.runInContext('error.value', context), /20250324_music_db.xml.*404/)
-})
-
-test('charts absent from the selected database or with zero levels are excluded', async () => {
-  const context = app(async () => ({ json: async () => ({
-    description: '', body: {
-      charts: [
-        { chartID: 'old', difficulty: 'EXH', data: { inGameID: 1 } },
-        { chartID: 'new-chart', difficulty: 'MXM', data: { inGameID: 1 } },
-        { chartID: 'new-song', difficulty: 'MXM', data: { inGameID: 2 } },
-      ],
-      pbs: ['old', 'new-chart', 'new-song'].map(chartID => ({ chartID, scoreData: { score: 9900000, grade: 'S', lamp: 'MAXXIVE CLEAR' } })),
-    },
-  }) }))
-  vm.runInContext('userId.value = "test"; excludeNewCharts.value = true; mdb.value = { "1": { title: "Old", difficulty: [1, 2, 18, 0, 0] } }', context)
-  await vm.runInContext('loadData()', context)
-  assert.equal(vm.runInContext('best50.value.length', context), 1)
-  assert.equal(vm.runInContext('best50.value[0].chartID', context), 'old')
-  assert.equal(vm.runInContext('best50.value[0].lamp', context), 'EXCESSIVE CLEAR')
 })
