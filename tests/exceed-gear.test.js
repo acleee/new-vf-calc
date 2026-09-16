@@ -12,6 +12,8 @@ function app(fetch = () => {}) {
   const context = vm.createContext({
     ref: value => ({ value }), computed: fn => ({ get value() { return fn() } }), onMounted: () => {},
     fetch, console,
+    musicDbUrl: 'current.xml', historicalMusicDbUrl: 'historical.xml', TextDecoder,
+    URL: { revokeObjectURL() {} },
   })
   vm.runInContext(script, context)
   return context
@@ -68,20 +70,17 @@ test('Tachi imports normalize lamps before B50 ranking and exports', async () =>
         { chartID: 'excessive', scoreData: { score: 9950000, grade: 'S', lamp: 'EXCESSIVE CLEAR' } }],
     },
   }) }))
-  vm.runInContext('userId.value = "test"; mdb.value = { "1": { title: "Test", difficulty: [1, 2, 3, 4, 19.7], distributionDate: 20250325 } }', context)
+  vm.runInContext('userId.value = "test"; mdb.value = { "1": { title: "Test", difficulty: [1, 2, 3, 4, 19.7] } }', context)
   await vm.runInContext('loadData()', context)
   const rows = JSON.parse(vm.runInContext('JSON.stringify(best50.value)', context))
   assert.equal(rows[0].chartID, 'excessive')
   assert.ok(rows.every(row => row.lamp === 'EXCESSIVE CLEAR' && row.level === 19))
   assert.equal(vm.runInContext('totalVF.value', context), 0.806)
-  vm.runInContext('excludeNewCharts.value = true', context)
-  assert.equal(vm.runInContext('best50.value.length', context), 0)
-  assert.equal(vm.runInContext('totalVF.value', context), 0)
 })
 
 test('maps.db results retain decimal levels for mode changes', async () => {
   const context = app()
-  vm.runInContext('mdb.value = { "1": { mid: 1, title: "Test", artist: "Artist", difficulty: [1, 2, 3, 4, 19.7], distributionDate: 20250325 } }', context)
+  vm.runInContext('mdb.value = { "1": { mid: 1, title: "Test", artist: "Artist", difficulty: [1, 2, 3, 4, 19.7] } }', context)
   let remaining = true
   context.db = {
     exec: () => [{ values: [['hash', 'Test', 'Artist', '/sdvx/test', 4, 'MXM']] }],
@@ -96,43 +95,6 @@ test('maps.db results retain decimal levels for mode changes', async () => {
   vm.runInContext('nablaVF.value = true', context)
   assert.equal(vm.runInContext('best50.value[0].level', context), 19.7)
   assert.equal(vm.runInContext('best50.value[0].vf.toFixed(3)', context), '0.417')
-  vm.runInContext('excludeNewCharts.value = true', context)
-  assert.equal(vm.runInContext('best50.value.length', context), 0)
-})
-
-test('date filtering happens before B50 selection, includes cutoff and restores scores in both modes', () => {
-  const context = app()
-  vm.runInContext(`allScores.value = [
-    ...Array.from({ length: 50 }, (_, i) => ({ chartID: i, level: 20, score: 10000000, grade: 'S', lamp: 'MAXXIVE CLEAR', distributionDate: 20250325 })),
-    ...[20250323, 20250324, 0, undefined].map((distributionDate, i) => ({ chartID: 'older-' + i, level: 19, score: 9900000, grade: 'S', lamp: 'MAXXIVE CLEAR', distributionDate })),
-  ]`, context)
-  for (const nabla of [false, true]) {
-    vm.runInContext(`nablaVF.value = ${nabla}; excludeNewCharts.value = false`, context)
-    assert.equal(vm.runInContext('best50.value.length', context), 50)
-    vm.runInContext('excludeNewCharts.value = true', context)
-    assert.equal(vm.runInContext('best50.value.length', context), 4)
-    assert.equal(vm.runInContext('best50.value.every(row => row.chartID.startsWith("older-"))', context), true)
-    assert.equal(vm.runInContext('totalVF.value.toFixed(3)', context), '1.608')
-    assert.equal(vm.runInContext('best50.value.every(row => row.lamp === "EXCESSIVE CLEAR")', context), true)
-    vm.runInContext('excludeNewCharts.value = false', context)
-    assert.equal(vm.runInContext('best50.value.length', context), 50)
-  }
-})
-
-test('XML parser reads the song distribution_date', () => {
-  const context = app()
-  context.DOMParser = class {
-    parseFromString() {
-      return {
-        querySelector: () => null,
-        querySelectorAll: () => [{
-          getAttribute: () => '1',
-          querySelector: selector => ({ textContent: selector === 'info > distribution_date' ? ' 20250325 ' : selector.endsWith('difnum') ? '190' : 'Test' }),
-        }],
-      }
-    }
-  }
-  assert.equal(vm.runInContext('parseMusicDbXml("fixture")["1"].distributionDate', context), 20250325)
 })
 
 test('image exports use the selected mode and normalized lamp', async () => {
@@ -142,18 +104,67 @@ test('image exports use the selected mode and normalized lamp', async () => {
     return { ok: true, blob: async () => ({}) }
   })
   context.URL = { createObjectURL: () => 'blob:test', revokeObjectURL: () => {} }
-  vm.runInContext(`excludeNewCharts.value = true; allScores.value = [
-    { level: 19.7, score: 9900000, grade: "S", lamp: "MAXXIVE CLEAR", distributionDate: 20250324 },
-    { level: 20, score: 10000000, grade: "S", lamp: "MAXXIVE CLEAR", distributionDate: 20250325 },
-  ]`, context)
+  vm.runInContext('allScores.value = [{ level: 19.7, score: 9900000, grade: "S", lamp: "MAXXIVE CLEAR" }]', context)
   for (const mode of ['exceed', 'nabla']) {
     vm.runInContext(`nablaVF.value = ${mode === 'nabla'}`, context)
     await vm.runInContext('generateImage()', context)
     assert.equal(payload.mode, mode)
-    assert.equal(payload.scores.length, 1)
     assert.equal(payload.scores[0].lamp, 'EXCESSIVE CLEAR')
     assert.equal(payload.scores[0].level, mode === 'nabla' ? 19.7 : 19)
   }
   vm.runInContext('clearGeneratedImage()', context)
   assert.equal(vm.runInContext('generatedImageUrl.value', context), '')
+})
+
+function mockXml(context, level) {
+  context.DOMParser = class {
+    parseFromString() {
+      return {
+        querySelector: () => null,
+        querySelectorAll: () => [{
+          getAttribute: () => '1',
+          querySelector: selector => ({ textContent: selector.endsWith('difnum') ? String(level) : 'Test' }),
+        }],
+      }
+    }
+  }
+}
+
+test('historical levels stay whole while current levels are scaled by ten', () => {
+  const context = app()
+  mockXml(context, 19)
+  assert.equal(vm.runInContext('parseMusicDbXml("fixture", 1)["1"].difficulty[4]', context), 19)
+  for (const nabla of [false, true]) {
+    vm.runInContext(`nablaVF.value = ${nabla}`, context)
+    assert.equal(vm.runInContext('calculateVF({ level: parseMusicDbXml("fixture", 1)["1"].difficulty[4], score: 9900000, grade: "S", lamp: "MAXXIVE CLEAR" }).toFixed(3)', context), '0.402')
+  }
+  mockXml(context, 197)
+  assert.equal(vm.runInContext('parseMusicDbXml("fixture")["1"].difficulty[4]', context), 19.7)
+})
+
+test('switching databases loads the correct file and scale and clears results', async () => {
+  const requested = []
+  const context = app(async url => {
+    requested.push(url)
+    mockXml(context, url === 'historical.xml' ? 19 : 197)
+    return { ok: true, arrayBuffer: async () => new ArrayBuffer(0) }
+  })
+  for (const historical of [false, true, false]) {
+    vm.runInContext(`excludeNewCharts.value = ${historical}; allScores.value = [{level: 19}]; generatedImageUrl.value = "blob:old"`, context)
+    await vm.runInContext('loadMusicDatabase()', context)
+    assert.equal(requested.at(-1), historical ? 'historical.xml' : 'current.xml')
+    assert.equal(vm.runInContext('mdb.value["1"].difficulty[4]', context), historical ? 19 : 19.7)
+    assert.equal(vm.runInContext('best50.value.length', context), 0)
+    assert.equal(vm.runInContext('generatedImageUrl.value', context), '')
+    assert.equal(vm.runInContext('mdbReady.value', context), true)
+  }
+})
+
+test('database load failure allows recovery without using stale data', async () => {
+  const context = app(async () => ({ ok: false, status: 404 }))
+  context.console = { error() {} }
+  await vm.runInContext('loadMusicDatabase()', context)
+  assert.equal(vm.runInContext('mdbReady.value', context), false)
+  assert.equal(vm.runInContext('databaseLoading.value', context), false)
+  assert.match(vm.runInContext('error.value', context), /404/)
 })

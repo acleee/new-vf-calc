@@ -41,10 +41,11 @@
           Calculate NABLA VF
         </label>
         <label class="mode-toggle">
-          <input type="checkbox" v-model="excludeNewCharts" :disabled="loading || generatingImage" @change="clearGeneratedImage" />
+          <input type="checkbox" v-model="excludeNewCharts" :disabled="loading || generatingImage || databaseLoading" @change="loadMusicDatabase" />
           Exclude charts added after 3/24/2025
         </label>
         <p class="calculation-note">MAXXIVE clears count as EXCESSIVE clears.</p>
+        <p class="calculation-note">After changing databases, calculate or upload maps.db again.</p>
       </div>
 
       <div v-if="playerSelect.visible" class="player-select card">
@@ -149,6 +150,7 @@
 import { ref, computed, onMounted } from "vue"
 import initSqlJs from "sql.js"
 import musicDbUrl from "@/assets/music_db.xml?url"
+import historicalMusicDbUrl from "@/assets/20250324_music_db.xml?url"
 
 const mdb = ref({})
 const mdbReady = ref(false)
@@ -158,10 +160,9 @@ const loading = ref(false)
 const error = ref("")
 const nablaVF = ref(false)
 const excludeNewCharts = ref(false)
-const DISTRIBUTION_DATE_CUTOFF = 20250324
+const databaseLoading = ref(false)
 const allScores = ref([])
 const best50 = computed(() => allScores.value
-  .filter(row => !excludeNewCharts.value || !(row.distributionDate > DISTRIBUTION_DATE_CUTOFF))
   .map(row => ({
   ...row,
   level: roundLevel(row.level),
@@ -296,7 +297,7 @@ async function generateImage() {
   }
 }
 
-function parseMusicDbXml(xmlText) {
+function parseMusicDbXml(xmlText, levelDivisor = 10) {
   const parser = new DOMParser()
   const doc = parser.parseFromString(xmlText, "application/xml")
 
@@ -320,21 +321,16 @@ function parseMusicDbXml(xmlText) {
     const artist =
       music.querySelector("info > artist_name")?.textContent?.trim() ?? ""
 
-    const distributionDate = Number(
-      music.querySelector("info > distribution_date")?.textContent?.trim()
-    ) || 0
-
     const difficulty = diffNames.map((name) => {
       const el = music.querySelector(`difficulty > ${name} > difnum`)
       const n = el?.textContent?.trim()
-      return (n ? parseInt(n, 10) : 0) / 10
+      return (n ? parseInt(n, 10) : 0) / levelDivisor
     })
 
     out[id] = {
       title,
       artist,
       difficulty,
-      distributionDate,
       mid: id,
     }
   }
@@ -342,9 +338,18 @@ function parseMusicDbXml(xmlText) {
   return out
 }
 
-onMounted(async () => {
+async function loadMusicDatabase() {
+  const historical = excludeNewCharts.value
+  databaseLoading.value = true
+  mdbReady.value = false
+  mdb.value = {}
+  allScores.value = []
+  clearGeneratedImage()
+  playerSelect.value = { visible: false, players: [], selected: "", dbBuffer: null }
+  error.value = ""
   try {
-    const response = await fetch(musicDbUrl)
+    const response = await fetch(historical ? historicalMusicDbUrl : musicDbUrl)
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
 
     // Get raw bytes
     const buffer = await response.arrayBuffer()
@@ -353,13 +358,18 @@ onMounted(async () => {
     const decoder = new TextDecoder("shift-jis")
     const xmlText = decoder.decode(buffer)
 
-    mdb.value = parseMusicDbXml(xmlText)
+    // Exceed Gear stores whole levels; the current DB stores tenths.
+    mdb.value = parseMusicDbXml(xmlText, historical ? 1 : 10)
     mdbReady.value = true
   } catch (e) {
-    console.error("Failed to load music_db.xml", e)
-    error.value = "Failed to load music database."
+    console.error("Failed to load music database", e)
+    error.value = `Failed to load ${historical ? "20250324_music_db.xml" : "music_db.xml"}: ${e.message}`
+  } finally {
+    databaseLoading.value = false
   }
-})
+}
+
+onMounted(loadMusicDatabase)
 
 function normalizeTitleArtist(str) {
   return (str ?? "").toString().trim().toLowerCase()
@@ -723,6 +733,10 @@ async function calculateFromDb(db, userName, scoresTable, chartsTable) {
     }
 
     const level = getLevelFromMdb(mdbSong, chart.diff_index)
+    if (!(level > 0)) {
+      skippedCount += 1
+      continue
+    }
     const diff = (chart.diff_shortname || "NOV").toUpperCase()
 
     // PB = best score + best lamp (from any play on this chart)
@@ -747,7 +761,6 @@ async function calculateFromDb(db, userName, scoresTable, chartsTable) {
     rows.push({
       chart_hash: chartHash,
       songId: mdbSong.mid,
-      distributionDate: mdbSong.distributionDate,
       title: chart.title,
       diff,
       level,
@@ -804,12 +817,15 @@ async function loadData() {
       }
 
       const level = getLevel(chart, mdbSong)
+      if (!(level > 0)) {
+        skippedCount += 1
+        continue
+      }
 
       const lamp = normalizeLamp(pb.scoreData.lamp)
 
       rows.push({
         chartID: pb.chartID,
-        distributionDate: mdbSong.distributionDate,
         songId: chart.data?.inGameID ?? chart.data?.songID ?? null,
         title: chart.song?.title ?? mdbSong.title,
         diff: chart.difficulty,
