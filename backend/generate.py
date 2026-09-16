@@ -29,21 +29,12 @@ WHITE     = (238, 240, 236)
 GRAY      = (135, 145, 135)
 GOLD      = (242, 242, 242)
 
-# Per-mode colour schemes: "nabla" (current game) vs "exceed" (Exceed Gear, the
-# previous version). Selected at render time via data["mode"].
-COLOR_SCHEMES = {
-    "nabla": {
-        "bg_top":    (3, 16, 7),      # near-black green, top-left
-        "bg_bottom": (11, 63, 18),    # rich, saturated green, bottom-right
-        "card_tint": (190, 255, 200), # soft mint-green card highlight
-        "label":     "NABLA VF B50",
-    },
-    "exceed": {
-        "bg_top":    (12, 13, 15),    # near-black gray, top-left
-        "bg_bottom": (58, 60, 65),    # lighter slate gray, bottom-right
-        "card_tint": (225, 228, 232), # soft cool-white card highlight
-        "label":     "EXCEED GEAR VF B50",
-    },
+# Exceed Gear is the only supported calculation and image style.
+COLOR_SCHEME = {
+    "bg_top":    (12, 13, 15),
+    "bg_bottom": (58, 60, 65),
+    "card_tint": (225, 228, 232),
+    "label":     "VF6 B50 (NO MXV)",
 }
 
 DIFF_STYLES = {
@@ -63,7 +54,7 @@ DIFF_STYLES = {
 LAMP_SHORT = {
     "PERFECT ULTIMATE CHAIN": "PUC",
     "ULTIMATE CHAIN":         "UC",
-    "MAXXIVE CLEAR":          "MXV",
+    "MAXXIVE CLEAR":          "EXC",
     "EXCESSIVE CLEAR":        "EXC",
     "CLEAR":                  "CLR",
     "FAILED":                 "FAIL",
@@ -72,7 +63,6 @@ LAMP_SHORT = {
 LAMP_STYLES = {
     "PUC":  {"text": ( 60,  40,   0), "bg": (220, 180,  40)},
     "UC":   {"text": (255, 255, 255), "bg": (210,  80, 140)},
-    "MXV":  {"text": ( 30,  30,  30), "bg": (180, 185, 180)},
     "EXC":  {"text": (255, 255, 255), "bg": (210, 110,  30)},
     "CLR":  {"text": (255, 255, 255), "bg": ( 60, 120, 210)},
     "FAIL": {"text": (255, 255, 255), "bg": (180,  45,  45)},
@@ -356,7 +346,6 @@ def generate_b50_image(data: dict) -> Image.Image:
     Expected keys in *data*:
         username   str
         vf         float
-        mode       str  – "nabla" (default) or "exceed" (Exceed Gear), picks the colour scheme
         scores     list[dict]  – up to 50 items, each with:
                        title, diff, level, score, grade, lamp, vf,
                        songId, timeAchieved (ms)
@@ -366,8 +355,7 @@ def generate_b50_image(data: dict) -> Image.Image:
     vf       = float(data.get("vf") or 0)
     now      = datetime.now(timezone.utc)
 
-    mode   = (data.get("mode") or "nabla").lower()
-    scheme = COLOR_SCHEMES.get(mode, COLOR_SCHEMES["nabla"])
+    scheme = COLOR_SCHEME
 
     img  = _background_gradient(IMAGE_WIDTH, IMAGE_HEIGHT, scheme["bg_top"], scheme["bg_bottom"])
     draw = ImageDraw.Draw(img)

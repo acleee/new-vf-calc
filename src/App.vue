@@ -36,10 +36,7 @@
             Upload maps.db
           </button>
         </div>
-        <label class="checkbox-row">
-          <input type="checkbox" v-model="exceedGear" />
-          Calculate Exceed Gear VF
-        </label>
+        <p class="calculation-note">Exceed Gear VF · MAXXIVE clears count as EXCESSIVE clears.</p>
       </div>
 
       <div v-if="playerSelect.visible" class="player-select card">
@@ -69,7 +66,7 @@
 
       <section v-if="best50.length" class="results">
         <div class="results-header card">
-          <h2 class="vf-display">{{ exceedGear ? "Exceed Gear VF:" : "Nabla VF:" }} <span class="vf-value">{{ totalVF.toFixed(3) }}</span></h2>
+          <h2 class="vf-display">Exceed Gear VF: <span class="vf-value">{{ totalVF.toFixed(3) }}</span></h2>
           <button type="button" class="btn btn-secondary export-csv-btn" @click="exportToCsv">
             Export to CSV
           </button>
@@ -153,7 +150,6 @@ const loading = ref(false)
 const error = ref("")
 const best50 = ref([])
 const totalVF = ref(0)
-const exceedGear = ref(false)
 let msg = ""
 let skippedCount = 0
 
@@ -244,7 +240,7 @@ async function generateImage() {
     const payload = {
       username: activePlayerName.value || "Player",
       vf: totalVF.value,
-      mode: exceedGear.value ? "exceed" : "nabla",
+      mode: "exceed",
       scores: best50.value.map((r) => ({
         title: r.title,
         diff: r.diff,
@@ -459,17 +455,14 @@ const gradeCoeff = {
 
 const clearCoeff = {
   "PERFECT ULTIMATE CHAIN": 1.10,
-  "ULTIMATE CHAIN": 1.06,
-  "MAXXIVE CLEAR": 1.04,
+  "ULTIMATE CHAIN": 1.05,
   "EXCESSIVE CLEAR": 1.02,
   "CLEAR": 1.0,
   "FAILED": 0.5
 }
 
-// Exceed Gear (previous game version): same table, but ultimate chain coeff is 1.05
-const clearCoeffExceed = {
-  ...clearCoeff,
-  "ULTIMATE CHAIN": 1.05
+function normalizeLamp(lamp) {
+  return lamp === "MAXXIVE CLEAR" ? "EXCESSIVE CLEAR" : lamp
 }
 
 function getLevel(chart, chartMeta) {
@@ -493,14 +486,14 @@ function getLevel(chart, chartMeta) {
 }
 
 // Exceed Gear only had whole-number chart levels
-function roundLevelForMode(level, exceed) {
-  return exceed ? Math.trunc(level) : level
+function roundLevel(level) {
+  return Math.trunc(level)
 }
 
-function calculateVF({ level, score, grade, lamp }, exceed = false) {
+function calculateVF({ level, score, grade, lamp }) {
   const g = gradeCoeff[grade] ?? 1
-  const c = (exceed ? clearCoeffExceed : clearCoeff)[lamp] ?? 1
-  const lvl = roundLevelForMode(level, exceed)
+  const c = clearCoeff[normalizeLamp(lamp)] ?? 1
+  const lvl = roundLevel(level)
 
   const base =
     lvl *
@@ -699,7 +692,7 @@ async function calculateFromDb(db, userName, scoresTable, chartsTable) {
       continue
     }
 
-    const level = roundLevelForMode(getLevelFromMdb(mdbSong, chart.diff_index), exceedGear.value)
+    const level = roundLevel(getLevelFromMdb(mdbSong, chart.diff_index))
     const diff = (chart.diff_shortname || "NOV").toUpperCase()
 
     // PB = best score + best lamp (from any play on this chart)
@@ -720,7 +713,7 @@ async function calculateFromDb(db, userName, scoresTable, chartsTable) {
     }
 
     const grade = gradeFromScore(bestScore)
-    const vf = calculateVF({ level, score: bestScore, grade, lamp: bestLamp }, exceedGear.value)
+    const vf = calculateVF({ level, score: bestScore, grade, lamp: bestLamp })
 
     rows.push({
       chart_hash: chartHash,
@@ -784,14 +777,15 @@ async function loadData() {
         continue
       }
 
-      const level = roundLevelForMode(getLevel(chart, mdbSong), exceedGear.value)
+      const level = roundLevel(getLevel(chart, mdbSong))
 
+      const lamp = normalizeLamp(pb.scoreData.lamp)
       const vf = calculateVF({
         level,
         score: pb.scoreData.score,
         grade: pb.scoreData.grade,
-        lamp: pb.scoreData.lamp
-      }, exceedGear.value)
+        lamp
+      })
 
       rows.push({
         chartID: pb.chartID,
@@ -801,7 +795,7 @@ async function loadData() {
         level,
         score: pb.scoreData.score,
         grade: pb.scoreData.grade,
-        lamp: pb.scoreData.lamp,
+        lamp,
         vf,
         timeAchieved: pb.timeAchieved ?? null,
       })
@@ -885,22 +879,10 @@ async function loadData() {
   flex-wrap: wrap;
 }
 
-.checkbox-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-top: 0.75rem;
-  color: #a8acc0;
-  font-size: 0.9rem;
-  cursor: pointer;
-  user-select: none;
-}
-
-.checkbox-row input[type="checkbox"] {
-  width: 16px;
-  height: 16px;
-  accent-color: #00b4ff;
-  cursor: pointer;
+.calculation-note {
+  margin: 0.75rem 0 0;
+  color: #9ca3af;
+  font-size: 0.875rem;
 }
 
 .file-input {
